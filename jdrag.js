@@ -1,30 +1,21 @@
 /*!
- * jdrag.js - Simple drag and drop for jQuery
- * http://github.com/mjijackson/jdrag.js
+ * jDrag - Simple drag and drop for jQuery
+ * http://github.com/mjijackson/jdrag
  */
 var jDrag = {};
 
-(function (jQuery, exports) {
-
-  var supportsTouch = "createTouch" in document;
+(function ($, exports) {
 
   exports.version = "0.1.0";
   exports.Handle = Handle;
   exports.Source = Source;
   exports.Target = Target;
 
-  // The current source being dragged.
-  var currentSource = null;
-
-  exports.currentSource = function () {
-    return currentSource;
-  };
-
-  jQuery.fn.dragSource = function (data) {
+  $.fn.dragSource = function (data) {
     return new Source(this.first(), data);
   };
 
-  jQuery.fn.dragTarget = function () {
+  $.fn.dragTarget = function () {
     return new Target(this.first());
   };
 
@@ -38,6 +29,9 @@ var jDrag = {};
     this.jQuery.addClass(Handle.className);
     this.offset = offset || $obj.offset();
   }
+
+  // A class name to use for all handles.
+  Handle.className = "jdrag-handle";
 
   // The opacity level to use for handles.
   Handle.opacity = 0.5;
@@ -80,34 +74,80 @@ var jDrag = {};
   function Source($obj, data) {
     this.jQuery = $obj;
     this.data = data || {};
-    this.isDragging = false;
-
-    jQuery(this).bind({
-      dragstart: function (e) {
-        this.isDragging = true;
-        this.handle = Source.makeHandle(this.jQuery);
-        this.handle.append();
-      },
-      dragend: function (e) {
-        this.isDragging = false;
-        this.handle.remove();
-      }
-    });
-
-    var self = this;
-
-    this.jQuery.mousedown(function (e) {
-      currentSource = self;
-      startListening();
-    });
+    this.isDragging = false; // Is this source currently being dragged?
+    this.currentTargets = []; // All targets this source is currently over
+    setupListeners(this);
   }
 
+  Source.prototype.dragTo = function (point) {
+    if (!this.isDragging) {
+      this.isDragging = true;
+      this.handle = Source.makeHandle(this);
+      this.handle.append();
+      $(this).trigger("dragstart");
+      this._lastPoint = point;
+    }
+
+    // Update the position of the drag handle.
+    var changeLeft = point.x - this._lastPoint.x;
+    var changeTop = point.y - this._lastPoint.y;
+
+    if (changeLeft || changeTop) {
+      this.handle.moveBy({left: changeLeft, top: changeTop});
+    }
+
+    // Save current point so we can get the diff on next drag.
+    this._lastPoint = point;
+
+    $(this).trigger("drag", point);
+  };
+
+  Source.prototype.dropAt = function (point) {
+    if (!this.isDragging) {
+      return;
+    }
+
+    this.isDragging = false;
+    this.handle.remove();
+
+    // Trigger one last drag so all targets can update themselves.
+    $(this).trigger("drag", point)
+
+    // Trigger the "drop" event on all current targets.
+    if (this.currentTargets.length > 0) {
+      $(this.currentTargets).trigger("drop", this);
+    }
+
+    $(this).trigger("dragend");
+
+    // Clear current targets *after* the dragend event fires.
+    this.currentTargets = [];
+  };
+
+  Source.prototype._addCurrentTarget = function (target) {
+    var index = $.inArray(target, this.currentTargets);
+
+    if (index === -1) {
+      this.currentTargets.push(target);
+    }
+  };
+
+  Source.prototype._removeCurrentTarget = function (target) {
+    var index = $.inArray(target, this.currentTargets);
+
+    if (index !== -1) {
+      this.currentTargets.splice(index, 1);
+    }
+  };
+
   /**
-   * Makes a Handle from the given jQuery `$obj`. This is exposed so that
-   * users can override it when desired. By default it creates a new Handle
-   * with a clone of the DOM element positioned at its current offset.
+   * Makes a Handle for the given source. By default, this method creates a
+   * clone of the source's jQuery object and positions it at the same position
+   * in the document. This is exposed so that users can override it to create
+   * custom handles when desired.
    */
-  Source.makeHandle = function ($obj) {
+  Source.makeHandle = function (source) {
+    var $obj = source.jQuery;
     return new Handle($obj.clone(), $obj.offset());
   };
 
@@ -130,7 +170,6 @@ var jDrag = {};
    */
   function Target($obj) {
     this.jQuery = $obj;
-    this.isActive = false;
   }
 
   /**
@@ -140,37 +179,24 @@ var jDrag = {};
     var self = this;
     var $this = $(this);
 
-    // Keeps track of whether or not this target is active for
-    // the given drag source.
-    var isActive = false;
+    // Is the source currently over this target?
+    var over = false;
 
-    $(source).bind({
-      drag: function (e, point) {
-        var wasActive = isActive;
-        isActive = self.containsPoint(point);
+    $(source).bind("drag", function (e, point) {
+      var wasOver = over;
+      over = self.containsPoint(point);
 
-        if (isActive) {
-          if (!wasActive) {
-            $this.trigger("dragenter", this);
-          }
-
-          $this.trigger("dragover", this);
-        } else if (wasActive) {
-          $this.trigger("dragleave", this);
+      if (over) {
+        if (!wasOver) {
+          source._addCurrentTarget(self);
+          $this.trigger("dragenter", this);
         }
-      },
-      drop: function (e, point) {
-        isActive = self.containsPoint(point);
 
-        if (isActive) {
-          $this.trigger("drop", this);
-        }
+        $this.trigger("dragover", this);
+      } else if (wasOver) {
+        source._removeCurrentTarget(self);
+        $this.trigger("dragleave", this);
       }
-    });
-
-    $(this).bind("drop", function (e, source) {
-      isActive = false;
-      currentTarget = null;
     });
 
     return this;
@@ -198,50 +224,31 @@ var jDrag = {};
     return top < y && bottom > y;
   };
 
-  function startListening() {
+  var supportsTouch = "createTouch" in document;
+  var currentSource = null;
+
+  function setupListeners(source) {
+    source.jQuery.mousedown(function (e) {
+      startListening(source);
+    });
+  }
+
+  function startListening(source) {
+    currentSource = source;
     $(document).mousemove(drag).mouseup(drop);
   }
 
   function stopListening() {
+    currentSource = null;
     $(document).unbind("mousemove", drag).unbind("mouseup", drop);
   }
 
-  var lastX, lastY;
-
   function drag(e) {
-    var x = e.clientX;
-    var y = e.clientY;
-
-    if (!currentSource.isDragging) {
-      jQuery(currentSource).trigger("dragstart");
-      lastX = x;
-      lastY = y;
-    }
-
-    // Update the position of the drag handle.
-    var changeLeft = x - lastX;
-    var changeTop = y - lastY;
-
-    if (changeLeft || changeTop) {
-      currentSource.handle.moveBy({left: changeLeft, top: changeTop});
-    }
-
-    // Update last cursor positions for next drag event.
-    lastX = x;
-    lastY = y;
-
-    jQuery(currentSource).trigger("drag", {x: x, y: y});
+    currentSource.dragTo({x: e.clientX, y: e.clientY});
   }
 
   function drop(e) {
-    if (currentSource.isDragging) {
-      jQuery(currentSource).trigger("drop", {x: e.clientX, y: e.clientY});
-      jQuery(currentSource).trigger("dragend");
-    }
-
-    currentTarget = null;
-    currentSource = null;
-
+    currentSource.dropAt({x: e.clientX, y: e.clientY});
     stopListening();
   }
 

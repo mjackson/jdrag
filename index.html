@@ -16,7 +16,7 @@
       width: 460px;
       height: 340px;
       border: 1px solid #ddd;
-      margin: 20% auto 0;
+      margin: 40px auto 0;
       -webkit-user-select: none;
       -khtml-user-select: none;
       -moz-user-select: none;
@@ -54,34 +54,32 @@
     <script type="text/javascript">
     $(function () {
       var source = $(".source").dragSource();
-      var activeTarget = null;
 
       $(".target").each(function (i, el) {
         var target = $(el).dragTarget().listen(source);
 
         $(target).bind({
           dragenter: function (e, source) {
-            activeTarget = this;
             this.jQuery.css("backgroundColor", "#ddd");
           },
-          dragleave: function (e, source) {
-            activeTarget = null;
+          drop: function (e, source) {
             this.jQuery.css("backgroundColor", "#eee");
           },
-          drop: function (e, source) {
+          dragleave: function (e, source) {
             this.jQuery.css("backgroundColor", "#eee");
           }
         });
       });
 
-      $(source).bind("dragend", function () {
-        if (activeTarget) {
-          this.jQuery.addClass("pinned").appendTo(activeTarget.jQuery);
+      $(source).bind("dragend", function (e) {
+        var length = this.currentTargets.length;
+
+        if (length > 0) {
+          var target = this.currentTargets[length - 1];
+          this.jQuery.addClass("pinned").appendTo(target.jQuery);
         } else {
           this.jQuery.removeClass("pinned").appendTo($("#demo1"));
         }
-
-        activeTarget = null;
       });
     });
     </script>
