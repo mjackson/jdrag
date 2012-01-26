@@ -206,22 +206,19 @@ var jDrag = {};
    * Returns `true` if this target's area contains the given point.
    */
   Target.prototype.containsPoint = function (point) {
-    var x = point.x;
-    var y = point.y;
-
     var offset = this.jQuery.offset();
 
     var left = offset.left;
     var right = left + this.jQuery.width();
 
-    if (x < left || x > right) {
+    if (point.x < left || point.x > right) {
       return false;
     }
 
     var top = offset.top;
     var bottom = top + this.jQuery.height();
 
-    return top < y && bottom > y;
+    return top < point.y && bottom > point.y;
   };
 
   var supportsTouch = "createTouch" in document;
