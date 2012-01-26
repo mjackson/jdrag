@@ -58,6 +58,15 @@ A target emits the following events:
 For detailed documentation on the arguments of each method in the public
 interface, please read the source. :)
 
+The order of events in a drag operation should be similar to this:
+
+  - dragstart
+  - drag
+  - dragenter
+  - dragover
+  - dragleave/drop
+  - dragend
+
 ## Usage
 
     // The #source element is the one that the user clicks/taps on
