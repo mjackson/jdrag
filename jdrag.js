@@ -6,17 +6,26 @@ var jDrag = {};
 
 (function (jQuery, exports) {
 
+  var supportsTouch = "createTouch" in document;
+
   exports.version = "0.1.0";
   exports.Handle = Handle;
   exports.Source = Source;
   exports.Target = Target;
 
+  // The current source being dragged.
+  var currentSource = null;
+
+  exports.currentSource = function () {
+    return currentSource;
+  };
+
   jQuery.fn.dragSource = function (data) {
     return new Source(this.first(), data);
   };
 
-  jQuery.fn.dragTarget = function (threshold) {
-    return new Target(this.first(), threshold);
+  jQuery.fn.dragTarget = function () {
+    return new Target(this.first());
   };
 
   /**
@@ -26,6 +35,7 @@ var jDrag = {};
    */
   function Handle($obj, offset) {
     this.jQuery = $obj;
+    this.jQuery.addClass(Handle.className);
     this.offset = offset || $obj.offset();
   }
 
@@ -56,9 +66,6 @@ var jDrag = {};
     this.jQuery.remove();
     return this;
   };
-
-  // The current drag source being dragged. There may only be one at a time.
-  var currentSource = null;
 
   /**
    * A drag source is instantiated with a DOM element as its trigger and
@@ -120,14 +127,9 @@ var jDrag = {};
    *                    target. Receives the source as its argument.
    *   - dragleave      Fired when a drag source leaves this target's area.
    *                    Receives the source as its argument.
-   *
-   * A target uses its threshold to determine what percentage of a handle's area
-   * must be within the target's area in order to consider the target an
-   * "active" drop target for the source represented by that handle.
    */
-  function Target($obj, threshold) {
+  function Target($obj) {
     this.jQuery = $obj;
-    this.threshold = parseFloat(threshold) || 0.5;
     this.isActive = false;
   }
 
@@ -138,76 +140,62 @@ var jDrag = {};
     var self = this;
     var $this = $(this);
 
-    $(source).bind({
-      drag: function (e) {
-        var wasActive = self.isActive;
-        self.isActive = self.containsHandle(this.handle);
+    // Keeps track of whether or not this target is active for
+    // the given drag source.
+    var isActive = false;
 
-        if (self.isActive) {
+    $(source).bind({
+      drag: function (e, point) {
+        var wasActive = isActive;
+        isActive = self.containsPoint(point);
+
+        if (isActive) {
           if (!wasActive) {
             $this.trigger("dragenter", this);
           }
 
           $this.trigger("dragover", this);
-        } else {
-          if (wasActive) {
-            $this.trigger("dragleave", this);
-          }
+        } else if (wasActive) {
+          $this.trigger("dragleave", this);
         }
       },
-      dragend: function (e) {
-        if (self.isActive) {
+      drop: function (e, point) {
+        isActive = self.containsPoint(point);
+
+        if (isActive) {
           $this.trigger("drop", this);
-          self.isActive = false;
         }
       }
     });
+
+    $(this).bind("drop", function (e, source) {
+      isActive = false;
+      currentTarget = null;
+    });
+
+    return this;
   };
 
   /**
-   * Returns `true` if this target's area contains the given `handle`.
+   * Returns `true` if this target's area contains the given point.
    */
-  Target.prototype.containsHandle = function (handle) {
-    var width = handle.jQuery.width();
-    var height = handle.jQuery.height();
-    var offset = handle.offset;
+  Target.prototype.containsPoint = function (point) {
+    var x = point.x;
+    var y = point.y;
 
-    return this.contains(width, height, offset.left, offset.top);
-  };
+    var offset = this.jQuery.offset();
 
-  /**
-   * Returns `true` if this target's area contains an object with the given
-   * dimensions and offsets.
-   */
-  Target.prototype.contains = function (width, height, left, top) {
-    var right = left + width;
-    var bottom = top + height;
+    var left = offset.left;
+    var right = left + this.jQuery.width();
 
-    var ownWidth = this.jQuery.width();
-    var ownHeight = this.jQuery.height();
-    var ownOffset = this.jQuery.offset();
-    var ownLeft = ownOffset.left;
-    var ownTop = ownOffset.top;
-    var ownRight = ownLeft + ownWidth;
-    var ownBottom = ownTop + ownHeight;
-
-    var overlapX;
-    if (right > ownLeft && left < ownRight) {
-      overlapX = Math.min(right, ownRight) - Math.max(left, ownLeft);
-    } else {
+    if (x < left || x > right) {
       return false;
     }
 
-    var overlapY;
-    if (bottom > ownTop && top < ownBottom) {
-      overlapY = Math.min(bottom, ownBottom) - Math.max(top, ownTop);
-    } else {
-      return false;
-    }
+    var top = offset.top;
+    var bottom = top + this.jQuery.height();
 
-    var overlap = (overlapX * overlapY) / (width * height);
-
-    return overlap >= this.threshold;
+    return top < y && bottom > y;
   };
 
   function startListening() {
@@ -218,29 +206,41 @@ var jDrag = {};
     $(document).unbind("mousemove", drag).unbind("mouseup", drop);
   }
 
-  var cursorX, cursorY;
+  var lastX, lastY;
 
   function drag(e) {
+    var x = e.clientX;
+    var y = e.clientY;
+
     if (!currentSource.isDragging) {
       jQuery(currentSource).trigger("dragstart");
+      lastX = x;
+      lastY = y;
     }
 
     // Update the position of the drag handle.
-    var left = e.clientX - cursorX;
-    var top = e.clientY - cursorY;
-    currentSource.handle.moveBy({left: left, top: top});
+    var changeLeft = x - lastX;
+    var changeTop = y - lastY;
 
-    // Update cursor positions for next drag event.
-    cursorX = e.clientX;
-    cursorY = e.clientY;
+    if (changeLeft || changeTop) {
+      currentSource.handle.moveBy({left: changeLeft, top: changeTop});
+    }
 
-    jQuery(currentSource).trigger("drag");
+    // Update last cursor positions for next drag event.
+    lastX = x;
+    lastY = y;
+
+    jQuery(currentSource).trigger("drag", {x: x, y: y});
   }
 
   function drop(e) {
     if (currentSource.isDragging) {
+      jQuery(currentSource).trigger("drop", {x: e.clientX, y: e.clientY});
       jQuery(currentSource).trigger("dragend");
     }
+
+    currentTarget = null;
+    currentSource = null;
 
     stopListening();
   }
